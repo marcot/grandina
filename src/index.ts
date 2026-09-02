@@ -13,12 +13,14 @@ export {
   downloadProduct,
   downloadGeoTIFF,
   downloadProductGeoTIFF,
+  geocodeComune,
 } from './radar-api.js';
 
 export {
   hailPredict,
   hailPredictZone,
   alertForComune,
+  nowcastPredict,
 } from './predictor.js';
 
 export {
@@ -55,4 +57,6 @@ export type {
   RiskLevel,
   HailProductType,
   RadarProductType,
+  HailForecast,
+  HailNowcast,
 } from './types.js';

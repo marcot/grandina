@@ -6,7 +6,10 @@
 import {
   hailPredictZone,
   alertForComune,
+  nowcastPredict,
 } from './predictor.js';
+import { geocodeComune } from './radar-api.js';
+import { formatHailText } from './format.js';
 
 const args = process.argv.slice(2);
 
@@ -61,6 +64,9 @@ async function run() {
     case 'alert':
       await runAlert(rest);
       break;
+    case 'forecast':
+      await runForecast(rest);
+      break;
     default:
       printUsage();
   }
@@ -78,10 +84,14 @@ async function runHail(rawArgs: string[]) {
   let lon = 0;
 
   if (comune) {
+    const geo = await geocodeComune(comune);
+    if (!geo) {
+      console.error(`Error: comune "${comune}" not found`);
+      process.exit(1);
+    }
+    [lat, lon] = geo;
     const result = await alertForComune(comune);
-    lat = 45.4642; // default: Milano
-    lon = 9.1900;
-    console.error(`Alert info for: ${result.comune}, ${result.regione} — using center coordinates`);
+    console.error(`Comune: ${result.comune}, ${result.regione} (${lat.toFixed(4)}, ${lon.toFixed(4)})`);
     console.error(`Weather alert: ${result.worstColor || 'Nessuna'}`);
   } else if (latStr && lonStr) {
     lat = parseFloat(latStr);
@@ -100,6 +110,7 @@ async function runHail(rawArgs: string[]) {
   const startTime = Date.now();
   const prediction = await hailPredictZone(lat, lon, radius);
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  const format = opts.get('format') || 'json';
 
   const output = {
     prediction: {
@@ -127,7 +138,26 @@ async function runHail(rawArgs: string[]) {
     },
   };
 
-  console.log(JSON.stringify(output, null, 2));
+  if (format === 'text') {
+    console.log(formatHailText({
+      risk: prediction.risk,
+      confidence: prediction.confidence,
+      poH: prediction.poH,
+      vil: prediction.vil,
+      etm: prediction.etm,
+      vmi: prediction.vmi,
+      hrD: prediction.hrD,
+      warnings: prediction.warnings,
+      nearestTimestamp: prediction.nearestTimestamp,
+      centerLat: prediction.centerLat,
+      centerLon: prediction.centerLon,
+      radiusKm: prediction.radiusKm,
+      samples: prediction.samples,
+      stats: prediction.stats,
+    }));
+  } else {
+    console.log(JSON.stringify(output, null, 2));
+  }
 }
 
 async function runAlert(rawArgs: string[]) {
@@ -159,6 +189,51 @@ async function runAlert(rawArgs: string[]) {
   }
 }
 
+async function runForecast(rawArgs: string[]) {
+  const opts = parseArgs(rawArgs);
+  const latStr = opts.get('lat') || '';
+  const lonStr = opts.get('lon') || '';
+  const radiusStr = opts.get('radius') || '50';
+  const hoursStr = opts.get('hours') || '1';
+  const radius = parseFloat(radiusStr) || 50;
+  const hours = parseFloat(hoursStr) || 1;
+
+  if (!latStr || !lonStr) {
+    console.error('Error: --lat and --lon are required for forecast');
+    process.exit(1);
+  }
+
+  const lat = parseFloat(latStr);
+  const lon = parseFloat(lonStr);
+  if (isNaN(lat) || isNaN(lon)) {
+    console.error('Error: --lat and --lon must be valid numbers');
+    process.exit(1);
+  }
+
+  const horizons: number[] = [];
+  for (let m = 10; m <= hours * 60; m += 10) {
+    horizons.push(m);
+  }
+
+  console.error(`Nowcasting for (${lat}, ${lon}), radius: ${radius}km, horizons: ${horizons.join(', ')} min`);
+
+  const startTime = Date.now();
+  const result = await nowcastPredict(lat, lon, radius, horizons);
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+  const output = {
+    center: { lat, lon, radiusKm: radius },
+    baseRisk: result.baseRisk,
+    displacement: result.displacement,
+    forecasts: result.forecasts,
+    warnings: result.warnings,
+    generated: new Date().toISOString(),
+    elapsedSec: elapsed,
+  };
+
+  console.log(JSON.stringify(output, null, 2));
+}
+
 function printUsage() {
   console.log(`Grandina — Hail prediction from Italian Civil Protection radar data
 
@@ -166,9 +241,11 @@ Usage:
   grandina hail --lat LAT --lon LON [--radius KM]
   grandina hail --comune COMUNE [--radius KM]
   grandina alert --comune COMUNE
+  grandina forecast --lat LAT --lon LON [--radius KM] [--hours H]
 
 Options:
   --lat LAT          Latitude of the point to query
+  --hours H          Forecast horizon in hours (default: 1, max: 2)
   --lon LON          Longitude of the point to query
   --comune COMUNE   Italian comune name (auto-queries AllertaMeteo)
   --radius KM        Analysis radius in km (default: 10)

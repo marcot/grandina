@@ -2,6 +2,8 @@
 // Radar-DPC API client
 // ============================================================
 
+import { fromArrayBuffer } from 'geotiff';
+import type { GeoTIFFImage } from 'geotiff';
 import type {
   ApiResponse,
   LastProduct,
@@ -118,6 +120,31 @@ export async function downloadGeoTIFF(url: string): Promise<Uint8Array> {
   return new Uint8Array(await res.arrayBuffer());
 }
 
+// The Radar-DPC LZW encoder omits the trailing EOI code, so the geotiff
+// decoder runs off the buffer end and warns per strip. The data decodes
+// correctly; this is a benign library message, so we silence it once.
+let warnedPatched = false;
+function patchLzwWarnOnce(): void {
+  if (warnedPatched) return;
+  warnedPatched = true;
+  const original = console.warn.bind(console);
+  console.warn = (...args: unknown[]): void => {
+    const first = args[0];
+    if (typeof first === 'string' && first.includes('EOI_CODE')) return;
+    original(...args);
+  };
+}
+
+/**
+ * Parse a GeoTIFF byte buffer and return its (first) image, with the
+ * benign LZW "EOI_CODE" decoder warning suppressed.
+ */
+export async function loadGeoTIFFImage(bytes: Uint8Array): Promise<GeoTIFFImage> {
+  patchLzwWarnOnce();
+  const tiff = await fromArrayBuffer(bytes.buffer as ArrayBuffer);
+  return tiff.getImage();
+}
+
 /**
  * Download a product and return its GeoTIFF bytes.
  */
@@ -127,4 +154,69 @@ export async function downloadProductGeoTIFF(
 ): Promise<Uint8Array> {
   const info = await downloadProduct(productType, timestampMs);
   return downloadGeoTIFF(info.url);
+}
+
+/**
+ * Geocode an Italian comune name to [lat, lon] using Nominatim (OSM).
+ * Returns null if the comune is not found.
+ */
+export async function geocodeComune(
+  comune: string,
+): Promise<[number, number] | null> {
+  const q = encodeURIComponent(comune);
+  const url =
+    `https://nominatim.openstreetmap.org/search?q=${q}` +
+    `&format=json&limit=1&countrycodes=it`;
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'grandina/0.1.0 (hail prediction tool)' },
+  });
+  if (!res.ok) return null;
+  const data = (await res.json()) as Array<{ lat: string; lon: string }>;
+  if (!data.length) return null;
+  const [lat, lon] = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+  if (isNaN(lat) || isNaN(lon)) return null;
+  return [lat, lon];
+}
+
+/**
+ * Get the N most recent products for a given type.
+ * Uses /findLastProductByType to get the latest, then repeatedly queries
+ * for earlier timestamps by stepping back 30 minutes at a time.
+ */
+export async function getProductsByType(
+  productType: string,
+  count: number,
+  beforeMs = Date.now(),
+): Promise<LastProduct[]> {
+  const results: LastProduct[] = [];
+  let cursorMs = roundDown(beforeMs);
+
+  for (let i = 0; i < count && cursorMs > 0; i++) {
+    const url = `${RADAR_API}/findLastProductByType?type=${encodeURIComponent(
+      productType,
+    )}`;
+    const res = await fetch(url, {
+      headers: { Accept: 'application/json', Origin: ORIGIN },
+    });
+
+    if (!res.ok) break;
+
+    const data = (await res.json()) as ApiResponse;
+    if (!data.lastProducts || data.lastProducts.length === 0) break;
+
+    const latest = data.lastProducts[0];
+
+    // Only add if before our cursor
+    if (latest.time <= cursorMs) {
+      results.push(latest);
+      cursorMs = latest.time - 300_000; // step back 30 min
+    } else {
+      // No product at this cursor — go back further
+      cursorMs -= 300_000;
+    }
+
+    if (results.length >= count) break;
+  }
+
+  return results;
 }

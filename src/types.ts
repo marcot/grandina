@@ -116,6 +116,39 @@ export interface WeatherAlert {
   worstColor: AlertColor | null; // highest severity across both days and all hazard types
 }
 
+// ---- Nowcasting types ----
+
+/** Forecast for a single future horizon */
+export interface HailForecast {
+  forecastTime: number; // epoch ms of the forecast time
+  minutesFromNow: number; // minutes from current time
+  risk: RiskLevel;
+  poH: number;
+  vil: number;
+  etm: number | null;
+  vmi: number | null;
+  confidence: number; // degrades with time
+  displacementKm: number; // estimated displacement from origin
+  displacementDirection: string; // cardinal direction of cell movement
+}
+
+/** Full nowcasting result for a location */
+export interface HailNowcast {
+  centerLat: number;
+  centerLon: number;
+  radiusKm: number;
+  baseTimestamp: number; // when the latest product was taken
+  baseRisk: RiskLevel; // current risk
+  basePrediction: HailPrediction | null;
+  displacement: {
+    kmPer30min: number; // average speed of convective cells
+    degrees: number; // direction in degrees (0=N, 90=E, 180=S, 270=W)
+    confidence: number;
+  };
+  forecasts: HailForecast[]; // predictions for each horizon
+  warnings: string[];
+}
+
 // ---- Radar product constants ----
 
 /** Products relevant for hail prediction */
