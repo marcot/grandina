@@ -90,6 +90,36 @@ const zone = await hailPredictZone(45.4642, 9.1900, 10);
 const alert = await alertForComune('Milano');
 ```
 
+## Web server
+
+Serve la mappa interattiva (mappa Leaflet con overlay radar POH/VIL/ETM/VMI e pannello di rischio grandine) e l'API JSON:
+
+```bash
+npm run build
+PORT=3000 node dist/server.js     # oppure: npm run serve
+```
+
+Sito: `https://grandina.dotmark.it` (deploy Coolify, repo `marcot/grandina`).
+
+| Endpoint | Descrizione |
+|---|---|
+| `GET /health` | Stato server + versione |
+| `GET /api/meta` | Geografia radar + configurazione display prodotti (soglie, colormap) |
+| `GET /api/products` | Timestamp degli ultimi prodotti (POH/VIL/ETM/VMI) |
+| `GET /api/radar/:type` | Overlay PNG (1 km/px, EPSG:3857) dell'ultimo prodotto |
+| `GET /api/zone?lat&lon&radius` | Previsione su zona circolare (`hailPredictZone`, raggio 1-200 km, def. 10) |
+| `GET /api/hail?lat&lon` | Previsione su punto singolo (`hailPredict`) |
+| `GET /api/nowcast?lat&lon&radius&hours` | Nowcasting 0-60/120 min (`nowcastPredict`, radius def. 50, hours 1 o 2) |
+| `GET /api/alert?comune` | AllertaMeteo per comune (cache 60 s) |
+| `GET /api/geocode?q` | Geocodifica comune → lat/lon |
+| `GET /api/geocode/reverse?lat&lon` | Inverso: lat/lon → comune (Nominatim) |
+
+Note:
+
+- Cache dei frame: i raster scaricati vengono tenuti in memoria 10 min (prodotti recenti) e 40 min (storia VIL per il nowcast); un nuovo download avviene solo quando cambia il timestamp del prodotto (ciclo ~5 min).
+- L'overlay è un PNG in proiezione Web Mercator (righe a y costante): l'allineamento con le tile OSM è esatto, il warp dall'elica radar (TM custom) è fatto lato server su griglia di controllo a 8 px.
+- I valori ETM nei raster sono in **metri**: l'overlay e l'interfaccia li mostrano in km.
+
 ## API Radar-DPC
 
 - Base: `https://radar-api.protezionecivile.it/`
