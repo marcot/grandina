@@ -41,11 +41,39 @@ import {
 // 1 km per pixel. We load each product once into memory and sample pixels,
 // rather than re-downloading per grid point.
 
-interface RadarFrame {
+export interface RadarFrame {
   data: Float32Array;
   width: number;
   height: number;
   timestamp: number;
+}
+/**
+ * TTL frame cache: decoded GeoTIFF rasters are ~6.7 MB each (1200×1400
+ * Float32). hailPredict/zone/nowcast used to re-download and re-decode per
+ * call; a web server needs one download per product window. Latest products
+ * are cached 10 min (they change every ~5 min), historical VIL frames 40 min
+ * (immutable once published).
+ */
+const LATEST_FRAME_TTL_MS = 10 * 60 * 1000;
+const HISTORY_FRAME_TTL_MS = 40 * 60 * 1000;
+const MAX_CACHE_ENTRIES = 16;
+const frameCache = new Map<string, { frame: RadarFrame; insertedAt: number; ttlMs: number }>();
+
+function cacheFrame(key: string, frame: RadarFrame, ttlMs: number): void {
+  const now = Date.now();
+  if (frameCache.size >= MAX_CACHE_ENTRIES) {
+    // Evict the oldest entry to bound memory (~54 MB at 8 full frames).
+    let oldestKey: string | null = null;
+    let oldestAt = Infinity;
+    for (const [k, v] of frameCache) {
+      if (v.insertedAt < oldestAt) { oldestAt = v.insertedAt; oldestKey = k; }
+    }
+    if (oldestKey !== null) frameCache.delete(oldestKey);
+  }
+  frameCache.set(key, { frame, insertedAt: now, ttlMs });
+  for (const [k, v] of frameCache) {
+    if (now - v.insertedAt > v.ttlMs) frameCache.delete(k);
+  }
 }
 
 /** Projected-km location of the raster top-left pixel (0,0). */
@@ -53,17 +81,23 @@ const RADAR_TIE_KM = { easting: -600, northing: 650 };
 
 /**
  * Download the latest product of a given type and parse it into an in-memory
- * frame. Returns null if the product is unavailable or fails to parse.
+ * frame, served from the TTL cache when the product timestamp is unchanged.
+ * Returns null if the product is unavailable or fails to parse.
  */
-async function loadRadarFrame(productType: string): Promise<RadarFrame | null> {
+export async function loadRadarFrame(productType: string): Promise<RadarFrame | null> {
   const latest = await getProductLatest(productType);
   if (!latest) return null;
+  const key = `latest:${productType}:${latest.time}`;
+  const cached = frameCache.get(key);
+  if (cached && Date.now() - cached.insertedAt <= cached.ttlMs) return cached.frame;
   try {
     const bytes = await downloadProductGeoTIFF(productType, latest.time);
     const image = await loadGeoTIFFImage(bytes);
     const rasters = await image.readRasters();
     const data = rasters[0] as Float32Array;
-    return { data, width: image.getWidth(), height: image.getHeight(), timestamp: latest.time };
+    const frame: RadarFrame = { data, width: image.getWidth(), height: image.getHeight(), timestamp: latest.time };
+    cacheFrame(key, frame, LATEST_FRAME_TTL_MS);
+    return frame;
   } catch {
     return null;
   }
@@ -376,17 +410,26 @@ async function downloadVilHistory(count: number, beforeMs: number): Promise<{ ti
   
   for (let i = 0; i < count; i++) {
     const ts = beforeMs - i * 30 * 60 * 1000; // 30 min intervals
-    
+    const cacheKey = `history:VIL:${ts}`;
+    const cached = frameCache.get(cacheKey);
+    if (cached && Date.now() - cached.insertedAt <= cached.ttlMs) {
+      const { frame } = cached;
+      frames.push({ timestamp: ts, data: frame.data, rows: frame.height, cols: frame.width });
+      continue;
+    }
+
     try {
       const bytes = await downloadProductGeoTIFF('VIL', ts);
-      
+
       // Parse with geotiff (benign LZW EOI_CODE warning suppressed)
       const image = await loadGeoTIFFImage(bytes);
       const rasters = await image.readRasters();
       const data = rasters[0] as Float32Array;
-      
-      frames.push({ timestamp: ts, data, rows: image.getHeight(), cols: image.getWidth() });
-      
+
+      const frame: RadarFrame = { data, width: image.getWidth(), height: image.getHeight(), timestamp: ts };
+      cacheFrame(cacheKey, frame, HISTORY_FRAME_TTL_MS);
+      frames.push({ timestamp: ts, data, rows: frame.height, cols: frame.width });
+
       // Rate limit between requests
       if (i < count - 1) await new Promise(r => setTimeout(r, 100));
     } catch {
