@@ -120,9 +120,23 @@ function loadOverlay(type, ts) {
 
 /* ---------- chips & legend ---------- */
 
+// Stessa rampa di opacità dell'overlay server-side: alpha = 255 * t^0.75
+// (valori deboli quasi trasparenti, valori forti pieni).
+function hexRgba(hex, a) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${(a / 255).toFixed(3)})`;
+}
+
 function gradientCss(stops) {
   const n = stops.length;
-  return `linear-gradient(90deg, ${stops.map((c, i) => `${c} ${(i / (n - 1)) * 100}%`).join(', ')})`;
+  return `linear-gradient(90deg, ${stops
+    .map((c, i) => {
+      const t = i / (n - 1);
+      return `${hexRgba(c, Math.round(255 * Math.pow(t, 0.75)))} ${(t * 100)}%`;
+    })
+    .join(', ')})`;
 }
 
 function buildControls() {
@@ -346,6 +360,54 @@ async function pickPoint(lat, lon) {
   }
 }
 
+/* ---------- geolocalizzazione ---------- */
+
+let userMarker = null;
+
+function showSearchMsg(msg) {
+  searchMsg.textContent = msg;
+  searchMsg.classList.add('show');
+  setTimeout(() => searchMsg.classList.remove('show'), 4000);
+}
+
+function locateUser(showErrors) {
+  const btn = $('gpsBtn');
+  if (!('geolocation' in navigator)) {
+    if (showErrors) showSearchMsg('GPS non disponibile su questo dispositivo');
+    return;
+  }
+  btn.classList.add('busy');
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      btn.classList.remove('busy');
+      const { latitude: lat, longitude: lon } = pos.coords;
+      if (!userMarker) {
+        userMarker = L.marker([lat, lon], {
+          interactive: false,
+          icon: L.divIcon({ className: '', html: '<div class="user-dot"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }),
+        }).addTo(map);
+      } else {
+        userMarker.setLatLng([lat, lon]);
+      }
+      map.setView([lat, lon], 10, { animate: false });
+      pickPoint(lat, lon);
+    },
+    (err) => {
+      btn.classList.remove('busy');
+      if (!showErrors) return;
+      const msg =
+        err.code === 1 ? 'Accesso alla posizione negato'
+        : err.code === 2 ? 'Posizione non disponibile'
+        : 'Rilascio della posizione scaduto';
+      showSearchMsg(msg);
+    },
+    { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 },
+  );
+}
+
+const gpsBtn = $('gpsBtn');
+gpsBtn.addEventListener('click', () => locateUser(true));
+
 searchForm.addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const q = searchInput.value.trim();
@@ -355,10 +417,8 @@ searchForm.addEventListener('submit', async (ev) => {
     const g = await api(`/api/geocode?q=${encodeURIComponent(q)}`);
     map.setView([g.lat, g.lon], 10, { animate: false });
     pickPoint(g.lat, g.lon);
-  } catch (e) {
-    searchMsg.textContent = 'Comune non trovato';
-    searchMsg.classList.add('show');
-    setTimeout(() => searchMsg.classList.remove('show'), 3500);
+  } catch {
+    showSearchMsg('Comune non trovato');
   }
 });
 
@@ -395,6 +455,7 @@ async function init() {
   setStale(Date.now());
   loadOverlay(state.active, state.products[state.active] ? state.products[state.active].time : null);
   setInterval(refreshProducts, 60000);
+  locateUser(false); // chiedi la posizione (prompt solo se non già autorizzata)
 }
 
 init();

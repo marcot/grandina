@@ -32,17 +32,11 @@ const GRID_STEP = 8; // control-grid spacing in px (bilinear interpolation span)
 const MAX_DIM = 2000; // output size cap (bound memory & render time)
 const PIXEL_M = 1000;
 
-/** Colormap index (0..255) for a value in [vmin, vmax]. */
-function lutIndex(value: number, vmin: number, vmax: number): number {
-  const t = (value - vmin) / (vmax - vmin);
-  const clamped = t < 0 ? 0 : t > 1 ? 1 : t;
-  return Math.floor(clamped * 255.999);
-}
-
 /**
  * Warp one product frame into a 3857-aligned RGBA PNG buffer.
  * Values that are nodata (<= -9000), out of frame, or below the product's
- * minDetect floor are left transparent.
+ * minDetect floor are left transparent; opacity otherwise scales with
+ * intensity (alpha = 255 * t^0.75), so weak echoes stay subtle.
  */
 export function renderOverlayPng(type: ProductType, frame: RadarFrame): Buffer {
   const cfg = PRODUCT_DISPLAY[type];
@@ -117,13 +111,16 @@ export function renderOverlayPng(type: ProductType, frame: RadarFrame): Buffer {
       if (!Number.isFinite(val) || val <= -9000) continue;
       if (convert) val = convert(val);
       if (minDetect !== undefined && val < minDetect) continue;
-      const idx = lutIndex(val, vmin, vmax);
-      const rgb = lut[idx];
+      const t = (val - vmin) / (vmax - vmin);
+      const tc = t < 0 ? 0 : t > 1 ? 1 : t;
+      const rgb = lut[Math.floor(tc * 255.999)];
       const o = (y * nx + x) * 4;
       out[o] = rgb[0];
       out[o + 1] = rgb[1];
       out[o + 2] = rgb[2];
-      out[o + 3] = 255;
+      // L'intensità governa anche l'opacità: i valori deboli restano quasi
+      // trasparenti, quelli forti pieni (gamma 0.75 per la leggibilità).
+      out[o + 3] = Math.round(255 * Math.pow(tc, 0.75));
     }
   }
 

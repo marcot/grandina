@@ -118,7 +118,9 @@ Note:
 
 - Cache dei frame: i raster scaricati vengono tenuti in memoria 10 min (prodotti recenti) e 40 min (storia VIL per il nowcast); un nuovo download avviene solo quando cambia il timestamp del prodotto (ciclo ~5 min).
 - L'overlay è un PNG in proiezione Web Mercator (righe a y costante): l'allineamento con le tile OSM è esatto, il warp dall'elica radar (TM custom) è fatto lato server su griglia di controllo a 8 px.
+- L'opacità dell'overlay cresce con l'intensità (alpha ∝ valore^0.75): gli echi deboli restano quasi trasparenti, quelli forti pieni. La legenda riflette la stessa rampa.
 - I valori ETM nei raster sono in **metri**: l'overlay e l'interfaccia li mostrano in km.
+- Geolocalizzazione: al caricamento il sito chiede la posizione (bottone GPS nella riga di ricerca); una volta autorizzata, centra la mappa sull'utente, segna la posizione con un marker pulsante e apre il pannello del comune corrispondente. Il GPS è opzionale: se rifiutato o assente, la mappa parte sull'Italia e la ricerca per comune funziona come da sempre.
 
 ## API Radar-DPC
 

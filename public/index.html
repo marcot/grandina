@@ -30,6 +30,13 @@
     <form id="search" autocomplete="off">
       <input id="q" name="q" placeholder="Cerca un comune…" aria-label="Cerca un comune">
       <button type="submit" aria-label="Cerca">Cerca</button>
+      <button type="button" id="gpsBtn" aria-label="La mia posizione (GPS)" title="La mia posizione">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <circle cx="12" cy="12" r="3.4" fill="currentColor"></circle>
+          <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.6"></circle>
+          <path d="M12 1.5v4M12 18.5v4M1.5 12h4M18.5 12h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
+        </svg>
+      </button>
       <span id="searchMsg"></span>
     </form>
   </div>
