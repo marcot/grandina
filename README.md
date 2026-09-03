@@ -4,6 +4,8 @@ Previsione di grandine dai dati radar della Protezione Civile italiana.
 
 Interroga gli endpoint REST della piattaforma [Radar-DPC](https://dpc-radar.protezionecivile.it/), scarica i prodotti radar rilevanti per la grandine (POH, VIL, ETM, VMI), ne estrae i valori alle coordinate fornite e restituisce una valutazione del rischio basata sulla letteratura scientifica. Integra [AllertaMeteo.app](https://allertameteo.app/) per le allerte ufficiali della Protezione Civile e, con il comando `forecast`, traccia le celle convettive sui frame VIL storici per un nowcasting a 0-60 minuti.
 
+Stato dello sviluppo, architettura e note di deploy: [DEVLOG.md](./DEVLOG.md).
+
 ## Installazione
 
 ```bash
